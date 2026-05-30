@@ -1,5 +1,6 @@
 import asyncio
 import json
+import uuid
 from contextlib import asynccontextmanager
 from typing import Dict
 
@@ -23,7 +24,6 @@ pending_responses: Dict[str, asyncio.Future] = {}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
     await redis_client.create_consumer_group("requests", "workers")
     task = asyncio.create_task(consume_responses())
 
@@ -34,7 +34,7 @@ async def lifespan(app: FastAPI):
     await redis_client.close()
 
 
-app = FastAPI(lifespan=lifespan, )
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -53,37 +53,44 @@ app.add_middleware(
 
 
 async def consume_responses():
-    """Фоновая задача: читает ответы и отдаёт ожидающим запросам"""
     last_id = '0'
-    print("Фоновая задача: читает ответы и отдаёт ожидающим запросам")
     while True:
-        messages = await redis_client.read_messages('requests', last_id, count=10)
-        print(f"Мы получили объект {messages}")
+        try:
+            messages = await redis_client.read_messages('requests', last_id, count=10)
+        except Exception as e:
+            print(f"consume_responses error: {e}")
+            await asyncio.sleep(1)
+            continue
+
         if messages:
             for msg_id, data in messages:
                 last_id = msg_id
-                request_id = data.get('user_uuid')
+                request_id = data.get('request_id')
 
                 if request_id and request_id in pending_responses:
-                    response = data.get('response', data.get('message'))
-                    pending_responses[request_id].set_result(response)
-                    del pending_responses[request_id]
-
-                    await redis_client.delete_message('requests', msg_id)
+                    if 'response' in data:
+                        response = data['response']
+                        try:
+                            pending_responses[request_id].set_result(response)
+                        except asyncio.InvalidStateError:
+                            pass
+                        pending_responses.pop(request_id, None)
+                        await redis_client.delete_message('requests', msg_id)
 
         await asyncio.sleep(0.01)
 
 
 async def handle_websocket(websocket: WebSocket, token_data, user):
     user_uuid = str(token_data.get(SUB))
+    request_id = str(uuid.uuid4())
 
     try:
         user_msg = await websocket.receive_text()
     except (WebSocketDisconnect, RuntimeError):
-        return  # клиент отвалился до отправки
+        return
 
     future = asyncio.Future()
-    pending_responses[user_uuid] = future
+    pending_responses[request_id] = future
 
     msg = MessageBase(
         user_uuid=user_uuid,
@@ -95,6 +102,7 @@ async def handle_websocket(websocket: WebSocket, token_data, user):
 
     await redis_client.push_message("requests", {
         'user_uuid': user_uuid,
+        'request_id': request_id,
         'message': msg.model_dump_json()
     })
 
@@ -106,9 +114,10 @@ async def handle_websocket(websocket: WebSocket, token_data, user):
         response = await future
         await websocket.send_text(response)
     except (WebSocketDisconnect, RuntimeError):
-        pass  # клиент отвалился пока ждали — норм
+        pass
     finally:
-        pending_responses.pop(user_uuid, None)
+        pending_responses.pop(request_id, None)
+
 
 @app.websocket("/chatbot/ws")
 async def websocket_handler(websocket: WebSocket, token: str | None = None):
@@ -126,13 +135,11 @@ async def websocket_handler(websocket: WebSocket, token: str | None = None):
 
     await websocket.accept()
 
-
     try:
         async for db in get_db():
             messages = await MessageRepo(db).get_conversation(token_data[SUB])
             messages_json = json.dumps([msg.model_dump_json() for msg in messages])
             await websocket.send_text(messages_json)
-
             break
 
         while True:
