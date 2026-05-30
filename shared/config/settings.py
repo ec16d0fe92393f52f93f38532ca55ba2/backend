@@ -14,6 +14,21 @@ class PostgresPool(BaseModel):
     pool_recycle: int = 1800
     pool_echo: bool = True
 
+class MinIOSettings(BaseModel):
+    minio_root_user: str = "minioadmin"
+    minio_upload_bucket: str = "images"
+    minio_root_password: str = "minioadmin123"
+    minio_endpoint: str = "localhost:9000"  # Добавим endpoint
+    minio_secure: bool = False  # True для HTTPS, False для HTTP
+    minio_browser: str = "on"
+
+    @computed_field
+    @property
+    def endpoint_url(self) -> str:
+        protocol = "https" if self.minio_secure else "http"
+        return f"{protocol}://{self.minio_endpoint}"
+
+
 class RedisSettings(BaseModel):
     redis_password: str = "password"
     redis_user: str = "username"
@@ -45,7 +60,7 @@ class MongoSettings(BaseSettings):
 
 class SharedSettings(BaseModel):
     cors_origin: List[AnyHttpUrl] = ["http://localhost:5173", "http://localhost:8080"]
-    allowed_hosts: List[str] = ["localhost", "127.0.0.1", "0.0.0.0"]
+    allowed_hosts: List[str] = ["localhost", "127.0.0.1", "62.182.139.27", "0.0.0.0"]
 
 
 class Settings(BaseSettings):
@@ -53,6 +68,7 @@ class Settings(BaseSettings):
     postgres_settings: PostgresSettings
     mongo_settings: MongoSettings = MongoSettings()
     redis_settings: RedisSettings = RedisSettings()
+    minio_settings: MinIOSettings = MinIOSettings()
 
     @computed_field
     @property
