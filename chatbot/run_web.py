@@ -1,6 +1,5 @@
 import asyncio
 import json
-import uuid
 from contextlib import asynccontextmanager
 from typing import Dict
 
@@ -92,7 +91,6 @@ async def handle_websocket(websocket: WebSocket, token_data, user):
 
     )
 
-    # Используем метод класса
     await redis_client.push_message("requests", {
         'request_id': user_uuid,
         'message': msg.model_dump_json()
@@ -126,7 +124,6 @@ async def websocket_handler(websocket: WebSocket, token: str | None = None):
     try:
         async for db in get_db():
             messages = await MessageRepo(db).get_conversation(token_data[SUB])
-            # Сериализуем список сообщений в JSON
             messages_json = json.dumps([msg.model_dump_json() for msg in messages])
             await websocket.send_text(messages_json)
             break
