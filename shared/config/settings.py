@@ -12,7 +12,7 @@ class PostgresPool(BaseModel):
     max_overflow: int = 10
     pool_timeout: int = 30
     pool_recycle: int = 1800
-    pool_echo: bool = True
+    pool_echo: bool = False
 
 class MinIOSettings(BaseModel):
     minio_root_user: str = "minioadmin"
