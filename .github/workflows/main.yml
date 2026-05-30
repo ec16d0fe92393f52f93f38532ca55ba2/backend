@@ -36,8 +36,7 @@ jobs:
         password: ${{ secrets.PASSWORD }}
         port: ${{ secrets.PORT }}
         script: |
-          sudo -i
-          cd /opt/backend
-          git pull origin main
-          docker compose down
-          docker compose up -d --build
+          sudo cd /opt/backend
+          sudo git pull origin main
+          sudo docker compose down
+          sudo docker compose up -d --build
