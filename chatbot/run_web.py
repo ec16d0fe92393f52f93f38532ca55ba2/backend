@@ -58,6 +58,7 @@ async def consume_responses():
     print("Фоновая задача: читает ответы и отдаёт ожидающим запросам")
     while True:
         messages = await redis_client.read_messages('requests', last_id, count=10)
+        print(f"Мы получили объект {messages}")
         if messages:
             for msg_id, data in messages:
                 last_id = msg_id
