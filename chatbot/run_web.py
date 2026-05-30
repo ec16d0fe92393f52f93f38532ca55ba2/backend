@@ -57,7 +57,7 @@ async def consume_responses():
     last_id = '0'
     while True:
         try:
-            messages = await redis_client.read_messages('responses', last_id, count=10)
+            messages = await redis_client.read_messages('requests', last_id, count=10)
         except redis.exceptions.TimeoutError:
             await asyncio.sleep(1)
 
@@ -71,7 +71,7 @@ async def consume_responses():
                     pending_responses[request_id].set_result(response)
                     del pending_responses[request_id]
 
-                    await redis_client.delete_message('responses', msg_id)
+                    await redis_client.delete_message('requests', msg_id)
 
         await asyncio.sleep(0.01)
 
