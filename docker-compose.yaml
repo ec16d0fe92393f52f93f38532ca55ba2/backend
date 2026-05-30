@@ -1,0 +1,307 @@
+x-postgres-environment-vars: &env-vars
+  POSTGRES_PASSWORD: postgres
+  POSTGRES_USER: postgres
+  POSTGRES_HOST: db
+  POSTGRES_NAME: postgres
+  POSTGRES_PORT: 5432
+
+
+services:
+  nginx:
+    image: nginx
+    container_name: nginx
+#    network_mode: host
+
+    ports:
+      - "8080:80"
+    depends_on:
+      - auth
+      - db
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+#    command: [ nginx-debug, '-g', 'daemon off;' ]
+  db:
+    image: postgres:15
+    container_name: db
+    restart: always
+    ports:
+      - 5432:5432
+    environment:
+      <<: *env-vars
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  auth:
+    depends_on:
+      - db
+    build:
+      context: .
+      dockerfile: docker_iternal/auth.Dockerfile
+    ports:
+      - 8001:8001
+    volumes:
+      - ./authapp:/app/authapp
+      - ./db:/app/db
+      - ./shared:/app/shared
+    env_file: .env
+
+    command: uvicorn authapp.run_web:app --host 0.0.0.0 --port 8001 --reload
+
+    develop:
+      watch:
+        - action: sync
+          path: ./authapp
+          target: /app/authapp
+          ignore:
+            - __pycache__/
+        - action: sync
+          path: ./db
+          target: /app/db
+        - action: sync
+          path: ./shared
+          target: /app/shared
+        - action: rebuild
+          path: ./docker_iternal/chat.Dockerfile
+
+  audit:
+    depends_on:
+      - db
+    build:
+      context: .
+      dockerfile: docker_iternal/audit.Dockerfile
+    ports:
+      - 8004:8004
+    volumes:
+      - ./auditapp:/app/auditapp
+      - ./db:/app/db
+      - ./shared:/app/shared
+    env_file: .env
+
+    command: uvicorn auditapp.run_web:app --host 0.0.0.0 --port 8004 --reload
+
+    develop:
+      watch:
+        - action: sync
+          path: ./auditapp
+          target: /app/auditapp
+          ignore:
+            - __pycache__/
+        - action: sync
+          path: ./db
+          target: /app/db
+        - action: sync
+          path: ./shared
+          target: /app/shared
+        - action: rebuild
+          path: ./docker_iternal/audit.Dockerfile
+
+
+
+  chatbot:
+    depends_on:
+      - db
+    build:
+      context: .
+      dockerfile: docker_iternal/chat.Dockerfile
+    ports:
+      - 8002:8002
+
+    volumes:
+      - ./chatbot:/app/chatbot
+      - ./db:/app/db
+      - ./shared:/app/shared
+    command: uvicorn chatbot.run_web:app --host 0.0.0.0 --port 8002 --reload
+
+    env_file: .env
+
+    develop:
+      watch:
+        - action: sync
+          path: ./chatbot
+          target: /app/chatbot
+          ignore:
+            - __pycache__/
+        - action: sync
+          path: ./db
+          target: /app/db
+        - action: sync
+          path: ./shared
+          target: /app/shared
+        - action: rebuild
+          path: ./docker_iternal/chat.Dockerfile
+
+
+
+
+  migrations:
+    depends_on:
+      - db
+    build:
+      context: .
+      dockerfile: docker_iternal/migrations.Dockerfile
+    env_file: .env
+
+
+  redis:
+      image: redis:latest
+      container_name: redis_container
+      environment:
+        - REDIS_PASSWORD=${REDIS_SETTINGS__REDIS_PASSWORD}
+        - REDIS_USER=${REDIS_SETTINGS__REDIS_USER}
+        - REDIS_USER_PASSWORD=${REDIS_SETTINGS__REDIS_USER_PASSWORD}
+      ports:
+        - "6379:6379"
+      volumes:
+        - redis_data:/data
+      deploy:
+        resources:
+          limits:
+            cpus: '0.50'
+            memory: 512M
+          reservations:
+            cpus: '0.25'
+            memory: 256M
+      command: >
+        sh -c '
+          mkdir -p /usr/local/etc/redis &&
+          echo "bind 0.0.0.0" > /usr/local/etc/redis/redis.conf &&
+          echo "requirepass $REDIS_SETTINGS__REDIS_PASSWORD" >> /usr/local/etc/redis/redis.conf &&
+          echo "appendonly yes" >> /usr/local/etc/redis/redis.conf &&
+          echo "appendfsync everysec" >> /usr/local/etc/redis/redis.conf &&
+          echo "user default on nopass ~* +@all" > /usr/local/etc/redis/users.acl &&
+          echo "user $REDIS_SETTINGS__REDIS_USER on >$REDIS_SETTINGS__REDIS_USER_PASSWORD ~* +@all" >> /usr/local/etc/redis/users.acl &&
+          redis-server /usr/local/etc/redis/redis.conf --aclfile /usr/local/etc/redis/users.acl
+        '
+      healthcheck:
+        test: ["CMD", "redis-cli", "-a", "$REDIS_SETTINGS__REDIS_PASSWORD", "ping"]
+        interval: 30s
+        timeout: 10s
+        retries: 5
+      restart: unless-stopped
+      tty: true
+      stdin_open: true
+
+  redisinsight:
+    image: redis/redisinsight:latest
+    container_name: redisinsight
+    ports:
+      - "5540:5540"  # Веб-интерфейс
+    volumes:
+      - redisinsight_data:/data
+    restart: unless-stopped
+    environment:
+      - RI_ACCEPT_TERMS_AND_CONDITIONS=true
+
+  minio:
+    image: minio/minio:latest
+    container_name: minio-server
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_SETTINGS__MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_SETTINGS__MINIO_ROOT_PASSWORD}
+      MINIO_BROWSER: ${MINIO_SETTINGS__MINIO_BROWSER}
+    ports:
+      - "9000:9000"   # API порт
+      - "9001:9001"   # Web консоль
+    volumes:
+      - minio_data:/data
+      - ./minio/config:/root/.minio
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+
+  # MinIO Client (для инициализации buckets)
+  minio-init:
+    image: minio/mc:latest
+    container_name: minio-client
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      sleep 5;
+      mc alias set myminio http://minio:9000 minioadmin minioadmin123;
+      mc mb myminio/images --ignore-existing;
+      mc mb myminio/results --ignore-existing;
+      mc policy set download myminio/images;
+      mc policy set download myminio/results;
+      echo 'Buckets created successfully';
+      exit 0;
+      "
+
+
+
+#  zookeeper:
+#    image: zookeeper:latest
+#    restart: on-failure
+#    ports:
+#      - "2181:2181"
+#    environment:
+#      ZOO_MY_ID: 1
+#      ZOO_PORT: 2181
+#      ZOO_SERVERS: server.1=zookeeper:2888:3888
+#      ALLOW_ANONYMOUS_LOGIN: "yes"
+#
+#  kafka:
+#    image: apache/kafka
+#    restart: on-failure
+#    ports:
+#      - "9092:9092"
+#    environment:
+##      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+##      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+##      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+##      KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
+##      KAFKA_BROKER_ID: 1
+##      KAFKA_LOG4J_LOGGERS: "kafka.controller=DEBUG,kafka.producer.async.DefaultEventHandler=INFO,state.change.logger=INFO"
+##      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+##      KAFKA_CFG_ZOOKEEPER_CONNECT: zookeeper:2181
+##      ALLOW_PLAINTEXT_LISTENER: "yes"
+##      KAFKA_LISTENERS: "INTERNAL://:29092,EXTERNAL://:9092"
+##      KAFKA_ZOOKEEPER_SESSION_TIMEOUT: "6000"
+##      KAFKA_RESTART_ATTEMPTS: "10"
+##      KAFKA_RESTART_DELAY: "5"
+##      KAFKA_CREATE_TOPICS: "lib:1:1"
+##      ZOOKEEPER_AUTOPURGE_PURGE_INTERVAL: "0"
+#      KAFKA_NODE_ID: 1
+#      KAFKA_PROCESS_ROLES: broker,controller
+#      KAFKA_LISTENERS: PLAINTEXT://localhost:9092,CONTROLLER://localhost:9093
+#      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+#      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+#      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+#      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+#      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+#      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+#      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+#      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+#      KAFKA_NUM_PARTITIONS: 3
+#    depends_on:
+#      - zookeeper
+#  kowl:
+#    image: quay.io/cloudhut/kowl:v1.4.0
+#    restart: on-failure
+#    volumes:
+#      - ./kowl_config:/etc/kowl/
+#    ports:
+#      - "8081:8080"
+#    entrypoint: ./kowl --config.filepath=/etc/kowl/config.yaml
+#    depends_on:
+#      - kafka
+
+
+
+volumes:
+  postgres-data:
+    driver: local
+  redis_data:
+  redisinsight_data:
+  minio_data:
+
+
+
+networks:
+  default:
+    driver: bridge
+
