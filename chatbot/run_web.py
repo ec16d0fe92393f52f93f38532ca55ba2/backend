@@ -73,20 +73,25 @@ async def consume_responses():
 
         await asyncio.sleep(0.01)
 
-async def handle_websocket(websocket: WebSocket, token_data, user):
-    user_msg = await websocket.receive_text()
 
+async def handle_websocket(websocket: WebSocket, token_data, user):
     user_uuid = str(token_data.get(SUB))
+
+    try:
+        user_msg = await websocket.receive_text()
+    except WebSocketDisconnect:
+        # Клиент отвалился до отправки — выходим
+        return
 
     future = asyncio.Future()
     pending_responses[user_uuid] = future
+
     msg = MessageBase(
         user_uuid=user_uuid,
         text=user_msg,
         ended_conversession=False,
-        ai_generated=False,
+        ai_generated=True,
         nickname=str(user.firstname) + " " + str(user.lastname),
-
     )
 
     await redis_client.push_message("requests", {
@@ -98,9 +103,13 @@ async def handle_websocket(websocket: WebSocket, token_data, user):
         await MessageRepo(db).add_message(msg)
         break
 
-    response = await future
-    await websocket.send_text(response)
-
+    try:
+        response = await future
+        await websocket.send_text(response)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        pending_responses.pop(user_uuid, None)
 
 @app.websocket("/chatbot/ws")
 async def websocket_handler(websocket: WebSocket, token: str | None = None):
@@ -124,6 +133,7 @@ async def websocket_handler(websocket: WebSocket, token: str | None = None):
             messages = await MessageRepo(db).get_conversation(token_data[SUB])
             messages_json = json.dumps([msg.model_dump_json() for msg in messages])
             await websocket.send_text(messages_json)
+
             break
 
         while True:
