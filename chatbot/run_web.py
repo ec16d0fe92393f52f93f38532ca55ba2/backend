@@ -74,16 +74,18 @@ async def mock_worker():
 
                 request_id = data.get('request_id')
                 user_uuid = data.get('user_uuid')
+                response = json.loads(data.get("message"))
 
                 if not request_id:
                     continue
 
                 await asyncio.sleep(2)
 
+
                 response_data = {
                     'user_uuid': user_uuid,
                     'request_id': request_id,
-                    'response': f'Ответ на: {data.get("message", "")}'
+                    'response': response.get("text")
                 }
 
                 print(f"[MOCK] Отправляю ответ: {response_data}")
@@ -113,11 +115,26 @@ async def consume_responses():
                 if request_id and request_id in pending_responses:
                     response = data.get('response', '')
                     try:
+
                         if not pending_responses[request_id].done():
-                            pending_responses[request_id].set_result(response)
+
+                            msg = MessageBase(
+                                user_uuid=data.get("user_uuid"),
+                                text=response,
+                                ended_conversession=False,
+                                ai_generated=True,
+                                nickname="Навигатор Мечты",
+                            )
+                            pending_responses[request_id].set_result(msg.model_dump_json())
                             print(f"[CONSUME] Ответ доставлен для {request_id}")
+
+
                     except asyncio.InvalidStateError:
                         print(f"[CONSUME] Future для {request_id} уже завершён")
+                    async for db in get_db():
+                        await MessageRepo(db).add_message(msg)
+                        print("В БД ДОБАВЛЕНА ЗАПИСЬ")
+                        break
                     pending_responses.pop(request_id, None)
                     await redis_client.delete_message('responses', msg_id)
 
