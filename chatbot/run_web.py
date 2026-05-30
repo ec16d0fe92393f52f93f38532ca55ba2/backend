@@ -64,7 +64,7 @@ async def consume_responses():
         if messages:
             for msg_id, data in messages:
                 last_id = msg_id
-                request_id = data.get('request_id')
+                request_id = data.get('user_uuid')
 
                 if request_id and request_id in pending_responses:
                     response = data.get('response', data.get('message'))
@@ -92,7 +92,7 @@ async def handle_websocket(websocket: WebSocket, token_data, user):
     )
 
     await redis_client.push_message("requests", {
-        'request_id': user_uuid,
+        'user_uuid': user_uuid,
         'message': msg.model_dump_json()
     })
 
