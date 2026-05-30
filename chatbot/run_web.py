@@ -55,12 +55,9 @@ app.add_middleware(
 async def consume_responses():
     """Фоновая задача: читает ответы и отдаёт ожидающим запросам"""
     last_id = '0'
+    print("Фоновая задача: читает ответы и отдаёт ожидающим запросам")
     while True:
-        try:
-            messages = await redis_client.read_messages('requests', last_id, count=10)
-        except redis.exceptions.TimeoutError:
-            await asyncio.sleep(1)
-
+        messages = await redis_client.read_messages('requests', last_id, count=10)
         if messages:
             for msg_id, data in messages:
                 last_id = msg_id
