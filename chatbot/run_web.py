@@ -3,6 +3,8 @@ import json
 import uuid
 from contextlib import asynccontextmanager
 from typing import Dict
+
+import redis
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -33,7 +35,7 @@ async def lifespan(app: FastAPI):
     await redis_client.close()
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(lifespan=lifespan, )
 
 app.add_middleware(
     CORSMiddleware,
@@ -55,7 +57,10 @@ async def consume_responses():
     """Фоновая задача: читает ответы и отдаёт ожидающим запросам"""
     last_id = '0'
     while True:
-        messages = await redis_client.read_messages('responses', last_id, count=10)
+        try:
+            messages = await redis_client.read_messages('responses', last_id, count=10)
+        except redis.exceptions.TimeoutError:
+            await asyncio.sleep(1)
 
         if messages:
             for msg_id, data in messages:
@@ -101,7 +106,7 @@ async def handle_websocket(websocket: WebSocket, token_data, user):
     await websocket.send_text(response)
 
 
-@app.websocket("/ws")
+@app.websocket("/chatbot/ws")
 async def websocket_handler(websocket: WebSocket, token: str | None = None):
     token_data = None
     user = None
