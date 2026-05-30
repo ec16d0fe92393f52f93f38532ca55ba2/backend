@@ -222,7 +222,7 @@ services:
     entrypoint: >
       /bin/sh -c "
       sleep 5;
-      mc alias set myminio http://minio:9000 minioadmin minioadmin123;
+      mc alias set myminio http://minio:9000 $MINIO_SETTINGS__MINIO_ROOT_USER $MINIO_SETTINGS__MINIO_ROOT_PASSWORD;
       mc mb myminio/images --ignore-existing;
       mc mb myminio/results --ignore-existing;
       mc policy set download myminio/images;
