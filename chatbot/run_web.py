@@ -79,9 +79,8 @@ async def handle_websocket(websocket: WebSocket, token_data, user):
 
     try:
         user_msg = await websocket.receive_text()
-    except WebSocketDisconnect:
-        # Клиент отвалился до отправки — выходим
-        return
+    except (WebSocketDisconnect, RuntimeError):
+        return  # клиент отвалился до отправки
 
     future = asyncio.Future()
     pending_responses[user_uuid] = future
@@ -90,7 +89,7 @@ async def handle_websocket(websocket: WebSocket, token_data, user):
         user_uuid=user_uuid,
         text=user_msg,
         ended_conversession=False,
-        ai_generated=True,
+        ai_generated=False,
         nickname=str(user.firstname) + " " + str(user.lastname),
     )
 
@@ -106,8 +105,8 @@ async def handle_websocket(websocket: WebSocket, token_data, user):
     try:
         response = await future
         await websocket.send_text(response)
-    except WebSocketDisconnect:
-        pass
+    except (WebSocketDisconnect, RuntimeError):
+        pass  # клиент отвалился пока ждали — норм
     finally:
         pending_responses.pop(user_uuid, None)
 
@@ -137,7 +136,13 @@ async def websocket_handler(websocket: WebSocket, token: str | None = None):
             break
 
         while True:
-            await handle_websocket(websocket, token_data, user)
+            try:
+                await handle_websocket(websocket, token_data, user)
+            except (WebSocketDisconnect, RuntimeError):
+                break
+            except Exception as e:
+                print(f"Unexpected error in handle_websocket: {e}")
+                break
 
     except WebSocketDisconnect:
         pass
