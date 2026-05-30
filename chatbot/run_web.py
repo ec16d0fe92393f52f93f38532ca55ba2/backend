@@ -83,14 +83,18 @@ async def consume_responses():
 async def handle_websocket(websocket: WebSocket, token_data, user):
     user_uuid = str(token_data.get(SUB))
     request_id = str(uuid.uuid4())
+    print(f"[WS] Новый запрос: request_id={request_id}, user_uuid={user_uuid}")
 
     try:
         user_msg = await websocket.receive_text()
-    except (WebSocketDisconnect, RuntimeError):
+        print(f"[WS] Получено сообщение: {user_msg}")
+    except (WebSocketDisconnect, RuntimeError) as e:
+        print(f"[WS] Клиент отключился до отправки: {e}")
         return
 
     future = asyncio.Future()
     pending_responses[request_id] = future
+    print(f"[WS] Future создан, pending_responses keys: {list(pending_responses.keys())}")
 
     msg = MessageBase(
         user_uuid=user_uuid,
@@ -100,24 +104,32 @@ async def handle_websocket(websocket: WebSocket, token_data, user):
         nickname=str(user.firstname) + " " + str(user.lastname),
     )
 
-    await redis_client.push_message("requests", {
+    redis_msg = {
         'user_uuid': user_uuid,
         'request_id': request_id,
         'message': msg.model_dump_json()
-    })
+    }
+    print(f"[WS] Пушу в Redis: {redis_msg}")
+
+    await redis_client.push_message("requests", redis_msg)
+    print(f"[WS] Запушено в Redis")
 
     async for db in get_db():
         await MessageRepo(db).add_message(msg)
         break
+    print(f"[WS] Сообщение сохранено в БД")
 
     try:
+        print(f"[WS] Жду ответ...")
         response = await future
+        print(f"[WS] Получен ответ: {response}")
         await websocket.send_text(response)
-    except (WebSocketDisconnect, RuntimeError):
-        pass
+        print(f"[WS] Ответ отправлен клиенту")
+    except (WebSocketDisconnect, RuntimeError) as e:
+        print(f"[WS] Клиент отключился пока ждали: {e}")
     finally:
         pending_responses.pop(request_id, None)
-
+        print(f"[WS] future удалён из pending_responses")
 
 @app.websocket("/chatbot/ws")
 async def websocket_handler(websocket: WebSocket, token: str | None = None):
