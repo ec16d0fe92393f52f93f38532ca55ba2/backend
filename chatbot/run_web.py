@@ -26,15 +26,15 @@ RESPONSE_TIMEOUT = 30
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await redis_client.create_consumer_group("requests", "workers")
-    mock_task = asyncio.create_task(mock_worker())
+    await redis_client.create_consumer_group("request", "workers")
+    # mock_task = asyncio.create_task(mock_worker())
     consume_task = asyncio.create_task(consume_responses())
 
     yield
 
-    mock_task.cancel()
+    # mock_task.cancel()
     consume_task.cancel()
-    await asyncio.gather(mock_task, consume_task, return_exceptions=True)
+    await asyncio.gather(consume_task, return_exceptions=True)
     await redis_client.close()
 
 
@@ -89,8 +89,8 @@ async def mock_worker():
                 }
 
                 print(f"[MOCK] Отправляю ответ: {response_data}")
-                await redis_client.push_message('responses', response_data)
-                await redis_client.delete_message('requests', msg_id)
+                await redis_client.push_message('response', response_data)
+                await redis_client.delete_message('request', msg_id)
 
         await asyncio.sleep(0.1)
 
@@ -100,7 +100,7 @@ async def consume_responses():
     print("[CONSUME] Запущена consume_responses")
     while True:
         try:
-            messages = await redis_client.read_messages('responses', last_id, count=10)
+            messages = await redis_client.read_messages('response', last_id, count=10)
         except Exception as e:
             print(f"[CONSUME] Ошибка: {e}")
             await asyncio.sleep(1)
@@ -137,7 +137,7 @@ async def consume_responses():
 
                         break
                     pending_responses.pop(request_id, None)
-                    await redis_client.delete_message('responses', msg_id)
+                    await redis_client.delete_message('response', msg_id)
 
         await asyncio.sleep(0.01)
 
@@ -185,7 +185,7 @@ async def websocket_handler(websocket: WebSocket, token: str | None = None):
                 nickname=str(user.firstname) + " " + str(user.lastname),
             )
 
-            await redis_client.push_message("requests", {
+            await redis_client.push_message("request", {
                 'user_uuid': user_uuid,
                 'request_id': request_id,
                 'message': user_msg
