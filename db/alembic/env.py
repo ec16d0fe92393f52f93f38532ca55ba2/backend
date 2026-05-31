@@ -38,6 +38,7 @@ from db.models import *
 
 from db.models.messeges import *
 from db.models.users import *
+from db.models.finance import *
 
 from db.database import Base
 

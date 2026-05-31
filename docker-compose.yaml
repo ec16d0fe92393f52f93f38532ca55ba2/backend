@@ -10,16 +10,15 @@ services:
   nginx:
     image: nginx
     container_name: nginx
-#    network_mode: host
-
     ports:
       - "8080:80"
     depends_on:
       - auth
+      - finance
+      - gamification
       - db
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
-#    command: [ nginx-debug, '-g', 'daemon off;' ]
   db:
     image: postgres:15
     container_name: db
@@ -132,6 +131,66 @@ services:
 
 
 
+
+  finance:
+    depends_on:
+      - db
+    build:
+      context: .
+      dockerfile: docker_iternal/finance.Dockerfile
+    ports:
+      - 8003:8003
+    volumes:
+      - ./financeapp:/app/financeapp
+      - ./db:/app/db
+      - ./shared:/app/shared
+    env_file: .env
+    command: uvicorn financeapp.run_web:app --host 0.0.0.0 --port 8003 --reload
+    develop:
+      watch:
+        - action: sync
+          path: ./financeapp
+          target: /app/financeapp
+          ignore:
+            - __pycache__/
+        - action: sync
+          path: ./db
+          target: /app/db
+        - action: sync
+          path: ./shared
+          target: /app/shared
+        - action: rebuild
+          path: ./docker_iternal/finance.Dockerfile
+
+  gamification:
+    depends_on:
+      - db
+    build:
+      context: .
+      dockerfile: docker_iternal/gamification.Dockerfile
+    ports:
+      - 8005:8005
+    volumes:
+      - ./gamificationapp:/app/gamificationapp
+      - ./db:/app/db
+      - ./shared:/app/shared
+    env_file: .env
+    command: uvicorn gamificationapp.run_web:app --host 0.0.0.0 --port 8005 --reload
+    develop:
+      watch:
+        - action: sync
+          path: ./gamificationapp
+          target: /app/gamificationapp
+          ignore:
+            - __pycache__/
+        - action: sync
+          path: ./db
+          target: /app/db
+        - action: sync
+          path: ./shared
+          target: /app/shared
+        - action: rebuild
+          path: ./docker_iternal/gamification.Dockerfile
 
   migrations:
     depends_on:
@@ -294,7 +353,6 @@ services:
 
 volumes:
   postgres-data:
-    driver: local
   redis_data:
   redisinsight_data:
   minio_data:

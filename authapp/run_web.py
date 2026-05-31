@@ -17,8 +17,8 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-
     yield
+
 app = FastAPI(lifespan=lifespan)
 
 

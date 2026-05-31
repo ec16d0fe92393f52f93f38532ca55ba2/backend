@@ -20,11 +20,9 @@ async def get_current_user(
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-
     try:
         payload = await decode_access_token(creds.credentials, db=db)
-        expr = (User.user_uuid == payload[SUB])
-        user = await User.find_by_expr(db=db, expr=expr)
+        user = await User.find_by_expr(db=db, expr=(User.user_uuid == payload[SUB]))
         if user is None:
             raise credentials_exception
     except (JWTError, ValidationError):
