@@ -21,6 +21,7 @@ from shared.jwt.jwt import decode_access_token, SUB
 settings = get_settings()
 redis_client = RedisClient()
 pending_responses: Dict[str, asyncio.Future] = {}
+active_connections: Dict[str, WebSocket] = {}   # user_uuid → WebSocket
 
 RESPONSE_TIMEOUT = 30
 
@@ -96,6 +97,15 @@ async def mock_worker():
         await asyncio.sleep(0.1)
 
 
+def _format_tasks_text(tasks: list) -> str:
+    lines = [f"Я составил для тебя {len(tasks)} персональных задачи:\n"]
+    for task in tasks:
+        lines.append(f"📋 {task.get('name', 'Задача')}")
+        lines.append(f"{task.get('payload', '')}")
+        lines.append(f"🏆 Награда: {task.get('reward', 0)} XP\n")
+    return "\n".join(lines)
+
+
 async def _save_ai_tasks(data: dict) -> None:
     user_uuid_str = data.get('user_uuid')
     tasks_raw = data.get('tasks', '[]')
@@ -110,6 +120,8 @@ async def _save_ai_tasks(data: dict) -> None:
 
     try:
         user_uuid_obj = uuid.UUID(user_uuid_str)
+
+        # 1. Сохраняем задачи в БД
         async for db in get_db():
             for task in tasks:
                 challenge = Challenge(
@@ -130,8 +142,33 @@ async def _save_ai_tasks(data: dict) -> None:
             await db.commit()
             print(f"[TASKS] Создано {len(tasks)} задач для {user_uuid_str}")
             break
+
+        # 2. Формируем сообщение-шаблон и отправляем в WebSocket
+        tasks_text = _format_tasks_text(tasks)
+        msg = MessageBase(
+            user_uuid=user_uuid_obj,
+            text=tasks_text,
+            ended_conversession=True,
+            ai_generated=True,
+            nickname="Навигатор Мечты",
+        )
+
+        # Отправляем в открытый WebSocket, если пользователь онлайн
+        ws = active_connections.get(user_uuid_str)
+        if ws:
+            try:
+                await ws.send_text(msg.model_dump_json())
+                print(f"[TASKS] Сообщение о задачах отправлено в WebSocket для {user_uuid_str}")
+            except Exception as e:
+                print(f"[TASKS] Не удалось отправить в WebSocket: {e}")
+
+        # Сохраняем сообщение в историю чата
+        async for db in get_db():
+            await MessageRepo(db).add_message(msg)
+            break
+
     except Exception as e:
-        print(f"[TASKS] Ошибка создания задач: {e}")
+        print(f"[TASKS] Ошибка: {e}")
 
 
 async def consume_responses():
@@ -200,6 +237,7 @@ async def websocket_handler(websocket: WebSocket, token: str | None = None):
     await websocket.accept()
 
     user_uuid = str(token_data[SUB])
+    active_connections[user_uuid] = websocket
 
     async for db in get_db():
         messages = await MessageRepo(db).get_conversation(user_uuid)
@@ -248,6 +286,8 @@ async def websocket_handler(websocket: WebSocket, token: str | None = None):
 
     except WebSocketDisconnect:
         pass
+    finally:
+        active_connections.pop(user_uuid, None)
 
 
 if __name__ == "__main__":
