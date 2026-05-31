@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Literal, Optional
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -18,6 +18,14 @@ class TransactionCreate(BaseModel):
     category: str
     type: Literal['income', 'expense']
     date: Optional[datetime] = None
+
+    @field_validator('date', mode='after')
+    @classmethod
+    def strip_timezone(cls, v: Optional[datetime]) -> Optional[datetime]:
+        """Приводим к UTC и снимаем tzinfo — БД хранит TIMESTAMP WITHOUT TIME ZONE."""
+        if v is not None and v.tzinfo is not None:
+            return v.astimezone(timezone.utc).replace(tzinfo=None)
+        return v
 
 
 class TransactionResponse(BaseModel):

@@ -145,36 +145,62 @@ async def seed_static_data(db: AsyncSession) -> None:
 
 async def get_or_init_profile(user_uuid, db: AsyncSession) -> UserProfile:
     profile = await db.get(UserProfile, user_uuid)
-    if profile is not None:
-        return profile
+    if profile is None:
+        profile = UserProfile(user_uuid=user_uuid)
+        db.add(profile)
+        await db.flush()
 
-    profile = UserProfile(user_uuid=user_uuid)
-    db.add(profile)
+    # Каждый блок идемпотентен: создаёт данные только если их ещё нет.
+    # Это позволяет миграциям предзаполнять данные без конфликтов.
 
-    for skill_data in SEED_SKILLS:
-        db.add(UserSkill(user_uuid=user_uuid, **skill_data))
+    skill_count = (await db.execute(
+        select(func.count()).select_from(UserSkill).where(UserSkill.user_uuid == user_uuid)
+    )).scalar()
+    if not skill_count:
+        for skill_data in SEED_SKILLS:
+            db.add(UserSkill(user_uuid=user_uuid, **skill_data))
 
-    now = datetime.utcnow()
-    for i in range(5, -1, -1):
-        month_idx = (now.month - i - 1) % 12
-        db.add(XpHistory(user_uuid=user_uuid, month=MONTHS_RU[month_idx], value=0))
+    history_count = (await db.execute(
+        select(func.count()).select_from(XpHistory).where(XpHistory.user_uuid == user_uuid)
+    )).scalar()
+    if not history_count:
+        now = datetime.utcnow()
+        for i in range(5, -1, -1):
+            month_idx = (now.month - i - 1) % 12
+            db.add(XpHistory(user_uuid=user_uuid, month=MONTHS_RU[month_idx], value=0))
 
-    lessons = (await db.execute(select(Lesson).order_by(Lesson.number))).scalars().all()
-    for idx, lesson in enumerate(lessons):
-        status = "in-progress" if idx == 0 else "locked"
-        db.add(UserLesson(user_uuid=user_uuid, lesson_id=lesson.id, status=status))
+    lesson_count = (await db.execute(
+        select(func.count()).select_from(UserLesson).where(UserLesson.user_uuid == user_uuid)
+    )).scalar()
+    if not lesson_count:
+        lessons = (await db.execute(select(Lesson).order_by(Lesson.number))).scalars().all()
+        for idx, lesson in enumerate(lessons):
+            status = "in-progress" if idx == 0 else "locked"
+            db.add(UserLesson(user_uuid=user_uuid, lesson_id=lesson.id, status=status))
 
-    challenges = (await db.execute(select(Challenge))).scalars().all()
-    for challenge in challenges:
-        db.add(UserChallenge(user_uuid=user_uuid, challenge_id=challenge.id))
+    challenge_count = (await db.execute(
+        select(func.count()).select_from(UserChallenge).where(UserChallenge.user_uuid == user_uuid)
+    )).scalar()
+    if not challenge_count:
+        challenges = (await db.execute(select(Challenge))).scalars().all()
+        for challenge in challenges:
+            db.add(UserChallenge(user_uuid=user_uuid, challenge_id=challenge.id))
 
-    achievements = (await db.execute(select(Achievement))).scalars().all()
-    for achievement in achievements:
-        db.add(UserAchievement(user_uuid=user_uuid, achievement_id=achievement.id, unlocked=False))
+    achievement_count = (await db.execute(
+        select(func.count()).select_from(UserAchievement).where(UserAchievement.user_uuid == user_uuid)
+    )).scalar()
+    if not achievement_count:
+        achievements = (await db.execute(select(Achievement))).scalars().all()
+        for achievement in achievements:
+            db.add(UserAchievement(user_uuid=user_uuid, achievement_id=achievement.id, unlocked=False))
 
-    items = (await db.execute(select(MarketItem))).scalars().all()
-    for item in items:
-        db.add(UserMarketItem(user_uuid=user_uuid, item_id=item.id))
+    market_count = (await db.execute(
+        select(func.count()).select_from(UserMarketItem).where(UserMarketItem.user_uuid == user_uuid)
+    )).scalar()
+    if not market_count:
+        items = (await db.execute(select(MarketItem))).scalars().all()
+        for item in items:
+            db.add(UserMarketItem(user_uuid=user_uuid, item_id=item.id))
 
     await db.commit()
     return profile

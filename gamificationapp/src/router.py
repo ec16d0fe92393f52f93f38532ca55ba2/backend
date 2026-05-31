@@ -16,7 +16,7 @@ from db.models.finance import (
     MarketItem, UserMarketItem,
 )
 from shared.dependencies import get_current_user
-from shared.finance_seed import get_or_init_profile, get_level_info
+from shared.finance_seed import get_or_init_profile, get_level_info, MONTHS_RU
 from gamificationapp.src.schemas import (
     TreeLevelResponse,
     SkillResponse,
@@ -68,9 +68,15 @@ async def get_xp_history(
     uid = current_user.user_uuid
     await get_or_init_profile(uid, db)
     history = (await db.execute(
-        select(XpHistory).where(XpHistory.user_uuid == uid).order_by(XpHistory.id)
+        select(XpHistory).where(XpHistory.user_uuid == uid)
     )).scalars().all()
-    return [XpHistoryItem(month=h.month, value=h.value) for h in history[-months:]]
+
+    # Сортируем так, чтобы текущий месяц был последним.
+    # month_order[month_name] = позиция от 0 (12 мес назад) до 11 (текущий)
+    now = datetime.utcnow()
+    month_order = {MONTHS_RU[(now.month - i - 1) % 12]: i for i in range(12)}
+    sorted_history = sorted(history, key=lambda h: month_order.get(h.month, 99), reverse=True)
+    return [XpHistoryItem(month=h.month, value=h.value) for h in sorted_history[-months:]]
 
 
 @router.get("/user/streak", response_model=StreakResponse)
