@@ -234,6 +234,35 @@ async def get_weekly_challenge(
     return items[0]
 
 
+@router.get("/challenges/ai", response_model=list[ChallengeResponse])
+async def get_ai_challenges(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: AsyncSession = Depends(get_db),
+) -> list[ChallengeResponse]:
+    uid = current_user.user_uuid
+    rows = (await db.execute(
+        select(Challenge, UserChallenge)
+        .join(UserChallenge, and_(
+            UserChallenge.challenge_id == Challenge.id,
+            UserChallenge.user_uuid == uid,
+        ))
+        .where(Challenge.type == "ai")
+        .order_by(UserChallenge.id)
+    )).all()
+    return [
+        ChallengeResponse(
+            id=ch.id,
+            title=ch.title,
+            description=ch.description,
+            progress=uc.progress,
+            total=ch.total,
+            reward=ch.reward,
+            status=uc.status,
+        )
+        for ch, uc in rows
+    ]
+
+
 @router.post("/challenges/{challenge_id}/complete", response_model=ChallengeCompleteResponse)
 async def complete_challenge(
     challenge_id: uuid.UUID,

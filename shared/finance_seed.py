@@ -2,7 +2,7 @@ import json
 from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, and_
 
 from db.models.finance import (
     Category, Lesson, Challenge, Achievement, MarketItem,
@@ -178,11 +178,20 @@ async def get_or_init_profile(user_uuid, db: AsyncSession) -> UserProfile:
             status = "in-progress" if idx == 0 else "locked"
             db.add(UserLesson(user_uuid=user_uuid, lesson_id=lesson.id, status=status))
 
-    challenge_count = (await db.execute(
-        select(func.count()).select_from(UserChallenge).where(UserChallenge.user_uuid == user_uuid)
+    regular_challenge_count = (await db.execute(
+        select(func.count()).select_from(UserChallenge)
+        .join(Challenge, UserChallenge.challenge_id == Challenge.id)
+        .where(
+            and_(
+                UserChallenge.user_uuid == user_uuid,
+                Challenge.type.in_(["daily", "weekly"]),
+            )
+        )
     )).scalar()
-    if not challenge_count:
-        challenges = (await db.execute(select(Challenge))).scalars().all()
+    if not regular_challenge_count:
+        challenges = (await db.execute(
+            select(Challenge).where(Challenge.type.in_(["daily", "weekly"]))
+        )).scalars().all()
         for challenge in challenges:
             db.add(UserChallenge(user_uuid=user_uuid, challenge_id=challenge.id))
 

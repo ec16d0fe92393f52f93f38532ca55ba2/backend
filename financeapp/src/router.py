@@ -40,12 +40,12 @@ async def get_balance(
     await get_or_init_profile(uid, db)
 
     income: float = (await db.execute(
-        select(func.coalesce(func.sum(Transaction.amount), 0))
+        select(func.coalesce(func.sum(func.abs(Transaction.amount)), 0))
         .where(and_(Transaction.user_uuid == uid, Transaction.type == "income"))
     )).scalar()
 
     expenses: float = (await db.execute(
-        select(func.coalesce(func.sum(Transaction.amount), 0))
+        select(func.coalesce(func.sum(func.abs(Transaction.amount)), 0))
         .where(and_(Transaction.user_uuid == uid, Transaction.type == "expense"))
     )).scalar()
 
@@ -54,7 +54,12 @@ async def get_balance(
         .where(SavingsGoal.user_uuid == uid)
     )).scalar()
 
-    return BalanceResponse(total=income - expenses, income=income, expenses=expenses, saved=saved)
+    return BalanceResponse(
+        total=income - expenses,
+        income=income,
+        expenses=expenses,
+        saved=saved,
+    )
 
 
 # ─── Transactions ────────────────────────────────────────────────────────────

@@ -14,6 +14,7 @@ from chatbot.sdk.messege_repo import MessageRepo
 from chatbot.sdk.redis_client import RedisClient
 from db.database import get_db
 from db.models.users import User
+from db.models.finance import Challenge, UserChallenge
 from shared.config.settings import get_settings
 from shared.jwt.jwt import decode_access_token, SUB
 
@@ -95,6 +96,44 @@ async def mock_worker():
         await asyncio.sleep(0.1)
 
 
+async def _save_ai_tasks(data: dict) -> None:
+    user_uuid_str = data.get('user_uuid')
+    tasks_raw = data.get('tasks', '[]')
+    try:
+        tasks = json.loads(tasks_raw)
+    except (json.JSONDecodeError, TypeError):
+        print("[TASKS] Не удалось распарсить tasks JSON")
+        return
+
+    if not user_uuid_str or not tasks:
+        return
+
+    try:
+        user_uuid_obj = uuid.UUID(user_uuid_str)
+        async for db in get_db():
+            for task in tasks:
+                challenge = Challenge(
+                    title=task.get('name', 'Задача от ИИ'),
+                    description=task.get('payload', ''),
+                    total=1,
+                    reward=int(task.get('reward', 50)),
+                    type='ai',
+                )
+                db.add(challenge)
+                await db.flush()
+                db.add(UserChallenge(
+                    user_uuid=user_uuid_obj,
+                    challenge_id=challenge.id,
+                    progress=0,
+                    status='pending',
+                ))
+            await db.commit()
+            print(f"[TASKS] Создано {len(tasks)} задач для {user_uuid_str}")
+            break
+    except Exception as e:
+        print(f"[TASKS] Ошибка создания задач: {e}")
+
+
 async def consume_responses():
     last_id = '0'
     print("[CONSUME] Запущена consume_responses")
@@ -110,15 +149,18 @@ async def consume_responses():
             for msg_id, data in messages:
                 last_id = msg_id
                 request_id = data.get('request_id')
-                print(f"[CONSUME] Получен ответ для {request_id}")
-                print(f"Response {data}")
+                print(f"[CONSUME] Получен ответ для {request_id}, type={data.get('type')}")
+
+                # AI прислал задачи — обрабатываем отдельно, не через pending_responses
+                if data.get('type') == 'tasks':
+                    await _save_ai_tasks(data)
+                    await redis_client.delete_message('response', msg_id)
+                    continue
 
                 if request_id and request_id in pending_responses:
                     response = data.get('message', '')
                     try:
-
                         if not pending_responses[request_id].done():
-
                             msg = MessageBase(
                                 user_uuid=data.get("user_uuid"),
                                 text=response,
@@ -128,14 +170,12 @@ async def consume_responses():
                             )
                             pending_responses[request_id].set_result(msg.model_dump_json())
                             print(f"[CONSUME] Ответ доставлен для {request_id}")
-
-
                     except asyncio.InvalidStateError:
                         print(f"[CONSUME] Future для {request_id} уже завершён")
+                        continue
                     async for db in get_db():
                         await MessageRepo(db).add_message(msg)
                         print("В БД ДОБАВЛЕНА ЗАПИСЬ")
-
                         break
                     pending_responses.pop(request_id, None)
                     await redis_client.delete_message('response', msg_id)

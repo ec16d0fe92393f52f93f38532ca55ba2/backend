@@ -19,6 +19,12 @@ class TransactionCreate(BaseModel):
     type: Literal['income', 'expense']
     date: Optional[datetime] = None
 
+    @field_validator('amount', mode='after')
+    @classmethod
+    def amount_must_be_positive(cls, v: float) -> float:
+        """Суммы всегда хранятся положительными; знак определяет поле type."""
+        return abs(v)
+
     @field_validator('date', mode='after')
     @classmethod
     def strip_timezone(cls, v: Optional[datetime]) -> Optional[datetime]:
