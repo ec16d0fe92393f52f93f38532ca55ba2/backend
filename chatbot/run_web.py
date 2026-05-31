@@ -111,9 +111,10 @@ async def consume_responses():
                 last_id = msg_id
                 request_id = data.get('request_id')
                 print(f"[CONSUME] Получен ответ для {request_id}")
+                print(f"Response {data}")
 
                 if request_id and request_id in pending_responses:
-                    response = data.get('response', '')
+                    response = data.get('message', '')
                     try:
 
                         if not pending_responses[request_id].done():
