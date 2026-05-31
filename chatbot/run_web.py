@@ -27,14 +27,14 @@ RESPONSE_TIMEOUT = 30
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await redis_client.create_consumer_group("requests", "workers")
-    mock_task = asyncio.create_task(mock_worker())
+    # mock_task = asyncio.create_task(mock_worker())
     consume_task = asyncio.create_task(consume_responses())
 
     yield
 
-    mock_task.cancel()
+    # mock_task.cancel()
     consume_task.cancel()
-    await asyncio.gather(mock_task, consume_task, return_exceptions=True)
+    await asyncio.gather(consume_task, return_exceptions=True)
     await redis_client.close()
 
 
@@ -134,6 +134,7 @@ async def consume_responses():
                     async for db in get_db():
                         await MessageRepo(db).add_message(msg)
                         print("В БД ДОБАВЛЕНА ЗАПИСЬ")
+
                         break
                     pending_responses.pop(request_id, None)
                     await redis_client.delete_message('responses', msg_id)
