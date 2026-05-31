@@ -30,15 +30,26 @@ class MessageRepo:
 
         return MessageItem.model_validate(model)
 
-    async def get_conversation(self, user_uuid: uuid.UUID, limit = 100) -> List[MessageItem]:
-
-        query = select(Message).where(Message.user_uuid == user_uuid).limit(limit)
-
+    async def get_conversation(self, user_uuid: uuid.UUID, limit: int = 100) -> List[MessageItem]:
+        query = (
+            select(Message)
+            .where(Message.user_uuid == user_uuid)
+            .order_by(Message.id.asc())
+            .limit(limit)
+        )
         result = await self.session.execute(query)
+        return [MessageItem.model_validate(m) for m in result.scalars().all()]
 
-        scalars = result.scalars().all()
-        msg_list = [ MessageItem.model_validate(scalar) for scalar in scalars ]
-
-        return msg_list
+    async def get_after_id(
+        self, user_uuid: uuid.UUID, after_id: int, limit: int = 50
+    ) -> List[MessageItem]:
+        query = (
+            select(Message)
+            .where(Message.user_uuid == user_uuid, Message.id > after_id)
+            .order_by(Message.id.asc())
+            .limit(limit)
+        )
+        result = await self.session.execute(query)
+        return [MessageItem.model_validate(m) for m in result.scalars().all()]
 
 
