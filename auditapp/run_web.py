@@ -5,7 +5,7 @@ import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from auditapp.src.domain import router as router_audit
+from auditapp.src.domain.router import router as router_audit
 
 
 from shared.config.settings import get_settings
