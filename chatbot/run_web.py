@@ -27,14 +27,14 @@ RESPONSE_TIMEOUT = 30
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await redis_client.create_consumer_group("requests", "workers")
-    # mock_task = asyncio.create_task(mock_worker())
+    mock_task = asyncio.create_task(mock_worker())
     consume_task = asyncio.create_task(consume_responses())
 
     yield
 
-    # mock_task.cancel()
+    mock_task.cancel()
     consume_task.cancel()
-    await asyncio.gather(consume_task, return_exceptions=True)
+    await asyncio.gather(mock_task, consume_task, return_exceptions=True)
     await redis_client.close()
 
 
@@ -74,7 +74,7 @@ async def mock_worker():
 
                 request_id = data.get('request_id')
                 user_uuid = data.get('user_uuid')
-                response = json.loads(data.get("message"))
+                response = data.get("message")
 
                 if not request_id:
                     continue
@@ -85,7 +85,7 @@ async def mock_worker():
                 response_data = {
                     'user_uuid': user_uuid,
                     'request_id': request_id,
-                    'response': response.get("text")
+                    'response': response
                 }
 
                 print(f"[MOCK] Отправляю ответ: {response_data}")
@@ -188,7 +188,7 @@ async def websocket_handler(websocket: WebSocket, token: str | None = None):
             await redis_client.push_message("requests", {
                 'user_uuid': user_uuid,
                 'request_id': request_id,
-                'message': msg.model_dump_json()
+                'message': user_msg
             })
 
             async for db in get_db():
